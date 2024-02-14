@@ -33,7 +33,7 @@
     "start": "run-p --print-label \"start:**\"",
     "purge": "node ./scripts/purge.js",
     "build:api": "parcel build --target api --public-url /arcaea-toolbelt --dist-dir ./arcaea-toolbelt",
-    "build:parcel": "parcel build --target default --public-url /arcaea-toolbelt --reporter @parcel/reporter-bundle-analyzer",
+    "build:parcel": "parcel build --target default --no-optimize --public-url /arcaea-toolbelt --reporter @parcel/reporter-bundle-analyzer",
     "build:sheetly": "sheetly build --dir src",
     "build": "run-s purge build:sheetly build:parcel build:api"
   },
