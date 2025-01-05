@@ -41,7 +41,7 @@ export class MusicPlayServiceImpl implements MusicPlayService {
   async getStatistics(): Promise<MusicPlayStatistics> {
     const songs = await this.chart.getSongData();
     const stats = await this.chart.getStatistics();
-    const constants = songs.flatMap((s) => s.charts.map((c) => c.constant));
+    const constants = songs.filter((s) => !s.version.deleted).flatMap((s) => s.charts.map((c) => c.constant));
     const maxs = [...constants].sort((a, b) => b - a).slice(0, 30);
     const maxptt = maxs.concat(maxs.slice(0, 10)).reduce((sum, curr) => sum + curr + 2, 0) / 40;
     return {
@@ -169,6 +169,7 @@ export class MusicPlayServiceImpl implements MusicPlayService {
     const modifier = this.computePotentialModifier(score);
     return Math.max(0, constant + modifier);
   }
+
   computeScoreResult(score: number, chart: Chart): ScoreResult {
     return {
       grade: this.computeGrade(score),
@@ -177,6 +178,17 @@ export class MusicPlayServiceImpl implements MusicPlayService {
       potential: this.computePotential(score, chart),
     };
   }
+
+  computeRankingLoseScore(play: NoteResult, chart: Chart): number {
+    if (![Difficulty.Future, Difficulty.Beyond, Difficulty.Eternal].includes(chart.difficulty)) {
+      return 0;
+    }
+    const score = this.computeScore(chart, play);
+    const perfectLosePoint = Math.max(0, Math.min(0.995 - play.perfect / chart.note, 0.095));
+    const scoreLosePoint = 28.5 * Math.max(0, Math.min(1 - score / MAX_BASE_SCORE, 0.01));
+    return -100 * (chart.constant * (perfectLosePoint + scoreLosePoint));
+  }
+
   computePMConstant(potential: number, overflow: boolean): number {
     const target = potential - 2;
     const gapFactor = target >= 8 ? 10 : 2;
@@ -206,6 +218,9 @@ export class MusicPlayServiceImpl implements MusicPlayService {
   }
 
   getPotentialRating(potential: number): number {
+    if (potential < 0) {
+      return -1;
+    }
     return [3.5, 7.0, 10.0, 11.0, 12.0, 12.5, 13.0, Infinity].findIndex((bound) => potential < bound);
   }
 

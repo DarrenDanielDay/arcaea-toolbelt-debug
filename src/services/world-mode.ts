@@ -5,7 +5,9 @@ import {
   NormalWorldMap,
   NormalWorldMapData,
   NormalWorldMapPlatforms,
+  RewardSummary,
   RewardType,
+  WorldMapReward,
 } from "../models/world-mode";
 import { CharacterImageKind, CharacterIndex, CharacterStatus } from "../models/character";
 import {
@@ -15,6 +17,7 @@ import {
   $CoreDataService,
   $Gateway,
   $MusicPlayService,
+  $PreferenceService,
   $WorldModeService,
   AssetsResolver,
   CharacterService,
@@ -27,6 +30,7 @@ import {
   MusicPlayService,
   MusicPlayStatistics,
   NextRewardInfo,
+  PreferenceService,
   RemainingProgress,
   WorldMapBonus,
   WorldModeService,
@@ -41,7 +45,15 @@ const BASE_BOOST = 27;
 const POTENTIAL_FACTOR = 2.45;
 const CHARACTER_FACTOR_RATIO = 50;
 @Injectable({
-  requires: [$CoreDataService, $ChartService, $MusicPlayService, $AssetsResolver, $Gateway, $CharacterService] as const,
+  requires: [
+    $PreferenceService,
+    $CoreDataService,
+    $ChartService,
+    $MusicPlayService,
+    $AssetsResolver,
+    $Gateway,
+    $CharacterService,
+  ] as const,
   implements: $WorldModeService,
 })
 export class WorldModeServiceImpl implements WorldModeService {
@@ -51,6 +63,7 @@ export class WorldModeServiceImpl implements WorldModeService {
   });
   #songIndex: SongIndex | null = null;
   constructor(
+    private readonly preference: PreferenceService,
     private readonly core: CoreDataService,
     private readonly chart: ChartService,
     private readonly music: MusicPlayService,
@@ -79,8 +92,8 @@ export class WorldModeServiceImpl implements WorldModeService {
     return maps.map((m) => this.withRewardImgs(items, m, songIndex, characterIndex));
   }
 
-  getMapRewards(map: NormalWorldMap): Partial<Record<RewardType, string[]>> {
-    const res: Partial<Record<RewardType, string[]>> = {};
+  getMapRewards(map: NormalWorldMap): Partial<Record<RewardType, RewardSummary>> {
+    const res: Partial<Record<RewardType, RewardSummary>> = {};
     const { platforms } = map;
     for (const key in platforms) {
       const platform = platforms[key];
@@ -91,13 +104,19 @@ export class WorldModeServiceImpl implements WorldModeService {
       if (!reward) {
         continue;
       }
-      (res[reward.type] ??= []).push(
-        reward.type === RewardType.Background || reward.type === RewardType.Item
-          ? reward.name
-          : reward.type === RewardType.Character
-          ? reward.name
-          : reward.name
-      );
+      const summary = (res[reward.type] ??= {});
+      const summaryItem = (summary[reward.name] ??= {
+        count: 0,
+        show: reward.name !== "残片",
+      });
+      switch (reward.type) {
+        case RewardType.Item:
+          summaryItem.count += reward.count;
+          break;
+        default:
+          summaryItem.count += 1;
+          break;
+      }
     }
     return res;
   }
@@ -119,6 +138,7 @@ export class WorldModeServiceImpl implements WorldModeService {
       } else if (bonus.type === "new") {
         if (bonus.x4) result *= 4;
       }
+      result *= bonus.aol;
     }
     return result;
   }
@@ -148,16 +168,12 @@ export class WorldModeServiceImpl implements WorldModeService {
     loop: for (let currentLevel = reachedLevel; currentLevel <= platforms.length; currentLevel++) {
       const platform = platforms[currentLevel]!;
       const { reward } = platform;
-      if (reward) {
-        switch (reward.type) {
-          case RewardType.Character:
-          case RewardType.Song:
-            nextRewardData = {
-              img: reward.img,
-              level: currentLevel,
-            };
-            break loop;
-        }
+      if (reward && this.isPrimaryReward(reward)) {
+        nextRewardData = {
+          img: reward.img,
+          level: currentLevel,
+        };
+        break loop;
       }
     }
     let nextReward: NextRewardInfo | null = null;
@@ -196,8 +212,9 @@ export class WorldModeServiceImpl implements WorldModeService {
   async inverseProgress(step: number, range: [low: number, high: number]): Promise<InverseProgressSolution[]> {
     const chartStats = await this.chart.getStatistics();
     const musicStats = await this.music.getStatistics();
+    const { aolWorldBoost: aol } = await this.preference.get();
     const solutions: InverseProgressSolution[] = [];
-    const [low, high] = range;
+    const [low, high] = [range[0] / aol, range[1] / aol];
     // 无加成
     solutions.push(this.solveProgressRange(step, range, chartStats, musicStats));
     // 新图
@@ -206,6 +223,7 @@ export class WorldModeServiceImpl implements WorldModeService {
       solution.world = {
         type: "new",
         x4: true,
+        aol,
       };
       solutions.push(solution);
     }
@@ -220,6 +238,7 @@ export class WorldModeServiceImpl implements WorldModeService {
           type: "legacy",
           fragment,
           stamina,
+          aol,
         };
         solutions.push(solution);
       }
@@ -232,14 +251,11 @@ export class WorldModeServiceImpl implements WorldModeService {
     let min = -Infinity,
       max = Infinity;
     if (playResult) {
-      const base = Math.floor(playResult * 10);
-      min = (base * 10) / 100;
-      max = (base * 10 + 10) / 100;
+      [min, max] = inferRange(playResult, 1, false);
     }
     if (step && progress) {
-      // TODO 验证实际显示的progress是截尾还是舍入
       const [minProgress, maxProgress] = inferRange(progress, 1, false);
-      const [minStep, maxStep] = isInt(step) ? inferRange(step, 1, false) : [step, step]
+      const [minStep, maxStep] = isInt(step) ? inferRange(step, 0, false) : [step, step];
       const minPlayResult = this.inversePlayResult(minProgress, maxStep);
       const maxPlayResult = this.inversePlayResult(maxProgress, minStep);
       // 缩小范围
@@ -311,6 +327,23 @@ export class WorldModeServiceImpl implements WorldModeService {
       }
     }
     return solution;
+  }
+
+  private isPrimaryReward(reward: WorldMapReward) {
+    switch (reward.type) {
+      case RewardType.Character:
+      case RewardType.Song:
+        return true;
+      case RewardType.Item:
+        if (reward.name === "以太之滴") {
+          return false;
+        }
+        if (reward.name === "残片") {
+          return false;
+        }
+        return true;
+    }
+    return false;
   }
 
   private findItemImage(name: string, itemImages: Record<string, string>): string {

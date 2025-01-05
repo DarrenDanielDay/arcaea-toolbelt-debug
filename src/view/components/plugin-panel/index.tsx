@@ -1,24 +1,28 @@
 import { sheet } from "./style.css.js";
 import { sheet as app } from "../../app.css.js";
-import { bootstrap } from "../../styles";
+import { bootstrap, table } from "../../styles";
 import { Inject } from "../../../services/di";
 import {
   $AssetsResolver,
+  $CharacterService,
   $ChartService,
   $CrossSiteScriptPluginService,
   $MusicPlayService,
+  $PreferenceService,
   $WorldModeService,
   AssetsResolver,
+  CharacterService,
   ChartService,
   CrossSiteScriptPluginService,
   MusicPlayService,
+  PreferenceService,
   WorldModeService,
 } from "../../../services/declarations";
 import * as lowiro from "../../../services/web-api";
 import type { Profile } from "../../../models/profile";
 import { FancyDialog } from "../fancy-dialog";
 import type { FC } from "hyplate/types";
-import { computed, signal, Show, HyplateElement, Component, element } from "hyplate";
+import { computed, signal, Show, HyplateElement, Component, element, nil } from "hyplate";
 import { ResultCard } from "../result-card";
 import { NoteResult } from "../../../models/music-play";
 import { PotentialBadge } from "../potential-badge";
@@ -26,10 +30,18 @@ import { formatError } from "../../../utils/format";
 import { CharacterImageKind, CharacterStatus } from "../../../models/character";
 import { indexBy } from "../../../utils/collections";
 
+type APICharacter = NonNullable<lowiro.UserProfile["character_stats"]>[number];
+
+type APIFactorNames = NonNullable<
+  {
+    [K in keyof APICharacter]: APICharacter[K] extends number ? K : never;
+  }[keyof APICharacter]
+>;
+const factorNames = ["frag", "prog", "overdrive"] satisfies APIFactorNames[];
 export
 @Component({
   tag: "arcaea-toolbelt-plugin-panel",
-  styles: [bootstrap, sheet, app],
+  styles: [bootstrap, table, sheet, app],
 })
 class ToolPanel extends HyplateElement {
   @Inject($AssetsResolver)
@@ -42,6 +54,10 @@ class ToolPanel extends HyplateElement {
   accessor chart!: ChartService;
   @Inject($MusicPlayService)
   accessor music!: MusicPlayService;
+  @Inject($PreferenceService)
+  accessor preference!: PreferenceService;
+  @Inject($CharacterService)
+  accessor chars!: CharacterService;
 
   characterList = new FancyDialog();
   recentList = new FancyDialog();
@@ -56,7 +72,11 @@ class ToolPanel extends HyplateElement {
     const selectRef = element("select");
     let controller = new AbortController();
     const initProfile = async () => {
-      profile$.set(await this.service.getProfile());
+      const profile = await this.service.getProfile();
+      this.preference.update({
+        aolWorldBoost: profile.subscription_multiplier / 100,
+      });
+      profile$.set(profile);
     };
     const openCharacterStatus = (profile: lowiro.UserProfile) => {
       this.characterList.showAlert(
@@ -129,6 +149,7 @@ class ToolPanel extends HyplateElement {
           return {
             expDiff,
             character,
+            previous,
           };
         }
       }
@@ -152,7 +173,56 @@ class ToolPanel extends HyplateElement {
               const isProfile = (p: unknown): p is lowiro.UserProfile => p === profile;
               const renderExpInferredConstant = () => {
                 const expChange = findExpChangedCharacter(lastProfile, profile);
-                const { expDiff, character } = expChange ?? {};
+                const { expDiff, character, previous } = expChange ?? {};
+                const renderBriefTable = (chars: (APICharacter | undefined)[]) => {
+                  const rowData = chars.filter((c) => !!c);
+                  if (rowData.length > 2) {
+                    const [, , lv1, lv20] = rowData;
+                    const factor3 = (c: APICharacter | undefined) => [c?.frag, c?.prog, c?.overdrive];
+                    console.log("csv data", JSON.stringify([...factor3(lv1), ...factor3(lv20)]));
+                  }
+                  if (!rowData.length) return <div>-</div>;
+                  return (
+                    <table class="table">
+                      <thead>
+                        <tr>
+                          <th>level</th>
+                          <th>frag</th>
+                          <th>step</th>
+                          <th>over</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rowData.map((c) => (
+                          <tr>
+                            <td>{c?.level || "-"}</td>
+                            <td>{c?.frag || "-"}</td>
+                            <td>{c?.prog || "-"}</td>
+                            <td>{c?.overdrive || "-"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  );
+                };
+                const solveL1L20Factors = () => {
+                  if (!previous || !character) {
+                    return [];
+                  }
+                  const f1Stat = structuredClone(character);
+                  const f20Stat = structuredClone(character);
+                  for (const factorName of factorNames) {
+                    const [f1, f20] = this.chars.computeL1L20Factor(
+                      { level: previous.level, value: previous[factorName] },
+                      { level: character.level, value: character[factorName] }
+                    );
+                    f1Stat[factorName] = f1;
+                    f20Stat[factorName] = f20;
+                  }
+                  f1Stat.level = 1;
+                  f20Stat.level = 20;
+                  return [f1Stat, f20Stat];
+                };
                 return (
                   <>
                     <div class="row">
@@ -161,9 +231,15 @@ class ToolPanel extends HyplateElement {
                         {character
                           ? `${character.display_name["zh-Hans"]}${
                               character.variant ? `（${character.variant["zh-Hans"]}）` : ""
-                            }`
+                            } id = ${character.character_id}`
                           : "-"}
                       </div>
+                    </div>
+                    <div class="row">
+                      <div class="col">变化角色的数值：</div>
+                    </div>
+                    <div class="row">
+                      <div class="col">{renderBriefTable([previous, character, ...solveL1L20Factors()])}</div>
                     </div>
                     <div class="row">
                       <div class="col">变化量：{expDiff ?? "-"}</div>
@@ -208,6 +284,7 @@ class ToolPanel extends HyplateElement {
                   <div class="my-1">玩家名：{display_name}</div>
                   <div class="my-1">潜力值：{rating > 0 ? (rating / 100).toFixed(2) : "-"}</div>
                   <div class="my-1">注册时间：{new Date(join_date).toLocaleString()}</div>
+                  <div class="my-1">世界模式加成：{Math.round((profile.subscription_multiplier ?? 100) - 100)}%</div>
                   <div>
                     <div class="my-1 actions">
                       <button
@@ -403,7 +480,7 @@ class ToolPanel extends HyplateElement {
                         根据接口返回的角色经验/beyond能量的变化值可逆算单曲潜力值，结合最近游玩的分数可逆算出定数。
                       </div>
                       <div>
-                        使用方法：先打开此面板获取一次当前beyond能量值，然后去游戏内爬梯打待测谱面。打完结算后再点击
+                        使用方法：先打开此面板获取一次当前角色经验值/beyond能量值，然后去游戏内爬梯打待测谱面。打完结算后再点击
                         <code>重新获取</code>按钮即可自动测算。
                       </div>
                       <div>如果打完谱面后能量溢出（超过200%），测定结果可能会不准确。</div>

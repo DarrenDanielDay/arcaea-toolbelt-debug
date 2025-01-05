@@ -2,7 +2,17 @@
 
 [Arcaea](https://arcaea.lowiro.com/)相关在线工具
 
+工具主体：
+
 <https://darrendanielday.github.io/arcaea-toolbelt>
+
+定数、搭档、地图等数据 & 数据维护工具：
+
+<https://github.com/DarrenDanielDay/arcaea-toolbelt-data>
+
+Arcaea Online 高仿 Best 30 图生成器
+
+<https://github.com/DarrenDanielDay/arcaea-toolbelt-aol-b30>
 
 ---
 
@@ -25,12 +35,12 @@
 - [x] `st3`存档成绩导入
 - [x] `b30/r10`计算 & `b39`看板 & 导出图片
 - [x] 存档内成绩查询 & 统计
-- [x] 定数范围查谱 & 随机谱面抽取
+- [x] 定数范围查谱 & 随机谱面抽取 & 新版本定数速递
 - [x] 世界模式地图预览
 - [x] 世界模式剩余进度计算
 - [x] 世界模式步数正算
 - [x] 世界模式控步数逆算
-- [ ] Beyond绳子相关计算
+- [ ] Beyond 绳子相关计算
 
 配套脚本工具功能：
 
@@ -42,8 +52,34 @@
 
 ## For developers
 
+1. Clone all repos in same directory:
+
+```sh
+mkdir DarrenDanielDay     # You can use any other directory name.
+cd DarrenDanielDay
+git clone https://darrendanielday.github.io/arcaea-toolbelt
+git clone https://github.com/DarrenDanielDay/arcaea-toolbelt-data
+git clone https://github.com/DarrenDanielDay/arcaea-toolbelt-aol-b30
+```
+
+2. Install dependencies for all repos ([Node.JS](https://nodejs.org) >= 18 is required):
+
 ```sh
 # install dependencies & start dev mode
+# should be run in different terminal
+
+# terminal 1 the main site
+cd DarrenDanielDay/arcaea-toolbelt
+npm install
+npm run start
+
+# terminal 2 the data site
+cd DarrenDanielDay/arcaea-toolbelt-data
+npm install
+npm run start
+
+# terminal 3 the player b30 generator template site (optional)
+cd DarrenDanielDay/arcaea-toolbelt-aol-b30
 npm install
 npm run start
 ```
@@ -66,7 +102,6 @@ You'll see `JSX` code in components, but this project is **NOT** using [`react`]
 - [Arcaea 中文 Wiki](https://wiki.arcaea.cn/)
 - [Arcaea-Infinity](Arcaea-Infinity)
 - [YukiChan](https://github.com/bsdayo/YukiChan/)
-- [ArcaeaResource-ActionUpdater](https://github.com/MoYoez/ArcaeaResource-ActionUpdater)
 
 ## License
 

@@ -3,8 +3,10 @@ import { $CoreDataProvider, $CoreDataService, CoreDataProvider, CoreDataService 
 import { SongData } from "../models/music-play";
 import { CharacterData } from "../models/character";
 import {
+  assetsInfo,
   characterData,
   chartData,
+  chartExpress,
   itemsData,
   meta,
   packList,
@@ -13,7 +15,8 @@ import {
   worldMapsLongterm,
 } from "../data/file-list";
 import { ChapterData, ItemData, NormalWorldMapData } from "../models/world-mode";
-import { ArcaeaToolbeltMeta } from "../models/misc";
+import { ArcaeaToolbeltMeta, ChartExpress } from "../models/misc";
+import { AssetsInfo } from "../models/file";
 
 @Injectable({
   requires: [$CoreDataProvider] as const,
@@ -26,15 +29,24 @@ export class CoreDataServiceImpl implements CoreDataService {
     return this.provider.get(path);
   }
 
+  getAssetsInfo(): Promise<AssetsInfo> {
+    return this.fetch(assetsInfo);
+  }
+
   getSongList(): Promise<any> {
     return this.fetch(songList);
   }
+
   getPackList(): Promise<any> {
     return this.fetch(packList);
   }
 
   getMetaData(): Promise<ArcaeaToolbeltMeta> {
     return this.fetch(meta);
+  }
+
+  getChartExpress(): Promise<ChartExpress[]> {
+    return this.fetch(chartExpress);
   }
 
   getChartData(): Promise<SongData[]> {

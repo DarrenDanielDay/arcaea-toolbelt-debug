@@ -11,6 +11,7 @@ export enum Side {
    * 消色侧
    */
   Colorless,
+  Lephon,
 }
 
 export interface Song {
@@ -33,6 +34,10 @@ export interface Song {
    * bpm不是数字，因为有会变节奏的曲子
    */
   bpm: string;
+  version: {
+    added: string;
+    deleted?: string;
+  };
 }
 
 export enum Difficulty {
@@ -40,15 +45,17 @@ export enum Difficulty {
   Present = "prs",
   Future = "ftr",
   Beyond = "byd",
+  Eternal = 'etr',
 }
 
-export const difficulties = [Difficulty.Past, Difficulty.Present, Difficulty.Future, Difficulty.Beyond];
+export const difficulties = [Difficulty.Past, Difficulty.Present, Difficulty.Future, Difficulty.Beyond, Difficulty.Eternal];
 
 export const difficultyIndexes: Record<Difficulty, number> = {
   [Difficulty.Past]: 0,
   [Difficulty.Present]: 1,
   [Difficulty.Future]: 2,
   [Difficulty.Beyond]: 3,
+  [Difficulty.Eternal]: 4,
 };
 
 export interface ChartOverride {

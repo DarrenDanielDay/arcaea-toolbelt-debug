@@ -8,7 +8,6 @@ import {
   Show,
   computed,
   cssVar,
-  effect,
   element,
   listen,
   nil,
@@ -19,12 +18,14 @@ import {
   $FileStorage,
   $Gateway,
   $MusicPlayService,
+  $PreferenceService,
   $ProfileService,
   ChartService,
   ChartStatistics,
   FileStorageService,
   Gateway,
   MusicPlayService,
+  PreferenceService,
   ProfileService,
 } from "../../../services/declarations";
 import { Inject } from "../../../services/di";
@@ -52,10 +53,12 @@ import type {
 import { HostAPIImpl } from "../../../services/generator-api-impl";
 import { CleanUpFunc } from "hyplate/types";
 import { ImageClipper } from "../../components/image-clipper";
+import { pad2 } from "../../../utils/string.js";
 
 ~HelpTip;
 
 export type B30Params = "template" | "url";
+export type TemplateKind = "yuki-chan" | "custom-template";
 
 @Component({
   tag: "player-b30",
@@ -72,7 +75,8 @@ class PlayerB39 extends HyplateElement {
   accessor router!: Router;
   @Inject($FileStorage)
   accessor fs!: FileStorageService;
-
+  @Inject($PreferenceService)
+  accessor preference!: PreferenceService;
   @Inject($ChartService)
   accessor chart!: ChartService;
   @Inject(HostAPIImpl, { once: true })
@@ -87,7 +91,7 @@ class PlayerB39 extends HyplateElement {
   gradeFilter = signal<Grade | ClearRank.PureMemory | ClearRank.Maximum | "">("");
   minConstant = signal(NaN);
   maxConstant = signal(NaN);
-  template = signal("yuki-chan");
+  template = signal<TemplateKind>("yuki-chan");
   custom = signal("");
   customTemplateStarted = signal(false);
   currentSite: URL | null = null;
@@ -101,6 +105,7 @@ class PlayerB39 extends HyplateElement {
     }),
     impl: {
       exportAsImage: (...args) => this.exportAsImageFile(...args),
+      getAssetsInfo: (...args) => this.host.getAssetsInfo(...args),
       getAllCharacters: (...args) => this.host.getAllCharacters(...args),
       getImages: (...args) => this.host.getImages(...args),
       getPackList: (...args) => this.host.getPackList(...args),
@@ -109,6 +114,7 @@ class PlayerB39 extends HyplateElement {
       resolveAssets: (...args) => this.host.resolveAssets(...args),
       pickImage: (...args) => this.pickImage(...args),
       resolveBackgrounds: (...args) => this.host.resolveBackgrounds(...args),
+      resolveBanners: (...args) => this.host.resolveBanners(...args),
       resolveCharacterImages: (...args) => this.host.resolveCharacterImages(...args),
       resolveCovers: (...args) => this.host.resolveCovers(...args),
       resolveGradeImgs: (...args) => this.host.resolveGradeImgs(...args),
@@ -117,19 +123,10 @@ class PlayerB39 extends HyplateElement {
     },
   });
   #connection: RPCConnection<ClientAPI> | null = null;
+  #autoStart = false;
 
   override render() {
     this.effect(() => {
-      const { template, url } = this.router.parseQuery<B30Params>();
-      if (template === "custom-template") {
-        this.template.set(template);
-      }
-      if (url) {
-        this.custom.set(url);
-      }
-
-      const cleanupParams = effect(() => {});
-      queueMicrotask(this.computeConditionalB30);
       const events = listen(this.best30 as HTMLElement);
       const unsubscribe = events("dblclick", () => {
         this.best30.requestFullscreen({
@@ -139,7 +136,6 @@ class PlayerB39 extends HyplateElement {
       return () => {
         unsubscribe();
         this.stopConnection();
-        cleanupParams();
       };
     });
     this.autorun(() => {
@@ -151,12 +147,18 @@ class PlayerB39 extends HyplateElement {
           this.stopConnection();
         });
       }
+      this.preference.update({
+        template: {
+          custom: isCustomTemplate,
+          url: url || undefined,
+        },
+      });
       this.router.updateQuery<B30Params>({
         template: isCustomTemplate ? template : null,
         url: url || null,
       });
     });
-    return <Future promise={this.chart.getStatistics()}>{(chartStats) => this._render(chartStats)}</Future>;
+    return <Future promise={this.#init()}>{(chartStats) => this._render(chartStats)}</Future>;
   }
 
   _render({ minimumConstant, maximumConstant }: ChartStatistics) {
@@ -166,7 +168,13 @@ class PlayerB39 extends HyplateElement {
       <div>
         {this.imagePicker}
         {this.downloadModal}
-        <form class="m-3">
+        <form
+          class="m-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            this.computeConditionalB30();
+          }}
+        >
           <details class="mb-3">
             <summary>高级查询</summary>
             <div class="input-group">
@@ -217,7 +225,7 @@ class PlayerB39 extends HyplateElement {
               <input
                 name="max-constant"
                 type="number"
-                min={maximumConstant}
+                min={minimumConstant}
                 max={maximumConstant}
                 step="0.1"
                 placeholder={maximumConstant.toFixed(1)}
@@ -312,6 +320,10 @@ class PlayerB39 extends HyplateElement {
         <div class="b30-container">
           <AutoRender>
             {() => {
+              if (this.#autoStart) {
+                this.#autoStart = false;
+                queueMicrotask(() => this.startConnection());
+              }
               if (this.template() === "yuki-chan") {
                 return <>{this.best30}</>;
               }
@@ -391,7 +403,6 @@ class PlayerB39 extends HyplateElement {
           }, "image/jpeg");
         });
         const now = new Date(b30.queryTime);
-        const pad2 = (n: number) => `${n}`.padStart(2, "0");
         const filename = `b30 ${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${pad2(
           now.getHours()
         )}-${pad2(now.getMinutes())}-${pad2(now.getSeconds())}.jpg`;
@@ -527,7 +538,7 @@ class PlayerB39 extends HyplateElement {
             selected.set(pickResult);
           }}
         >
-          <img src={pickResult.image.blobURL}></img>
+          <img src={pickResult.image?.blobURL}></img>
         </div>
       );
       const renderCustomPicker = (custom: CustomImageOptions) => {
@@ -693,6 +704,24 @@ class PlayerB39 extends HyplateElement {
       URL.revokeObjectURL(url);
     }
   };
+
+  async #init() {
+    let { template, url } = this.router.parseQuery<B30Params>();
+    const {
+      template: { url: templateURL, custom },
+    } = await this.preference.get();
+    url ??= templateURL;
+    if (template === "custom-template" || custom) {
+      this.template.set("custom-template");
+      this.#autoStart = true;
+    }
+    if (url) {
+      this.custom.set(url);
+    }
+    queueMicrotask(this.computeConditionalB30);
+    const stats = await this.chart.getStatistics();
+    return stats;
+  }
 }
 
 export const PlayerB30Route: Route = {

@@ -1,5 +1,5 @@
 import { SqlJsStatic } from "sql.js";
-import { ClearRank, Difficulty, NoteResult, PlayResult, difficulties } from "../models/music-play";
+import { Chart, ClearRank, NoteResult, PlayResult, difficulties } from "../models/music-play";
 import { B30Response, BestResultItem, Profile, ProfileUpdatePayload, ProfileV1, ProfileV2 } from "../models/profile";
 import { download } from "../utils/download";
 import { readBinary, readFile } from "../utils/read-file";
@@ -83,8 +83,9 @@ export class ProfileServiceImpl implements ProfileService {
   }
 
   formatPotential(potential: number): string {
-    const rating = Math.floor(potential * 100);
-    return (rating / 100).toFixed(2);
+    const maxDivider = 600000;
+    const rating = Math.round(potential * maxDivider);
+    return (rating / maxDivider).toFixed(2);
   }
 
   async getProfile(): Promise<Profile | null> {
@@ -226,6 +227,10 @@ export class ProfileServiceImpl implements ProfileService {
     const ordered = playResults
       .filter((item) => {
         const { song } = item;
+        if (song.version.deleted) {
+          // TODO support version filter
+          return false;
+        }
         if (packs.size && !packs.has(song.pack)) {
           hasFilter = true;
           return false;
@@ -244,7 +249,7 @@ export class ProfileServiceImpl implements ProfileService {
     const b10Sum = sum(ptt30.slice(0, 10));
     const maxPotential = (b10Sum + b30Sum) / 40;
     const minPotential = b30Sum / 40;
-    const potential = hasFilter ? this.formatPotential(maxPotential) : profile.potential;
+    const potential = this.formatPotential(hasFilter ? maxPotential : +profile.potential);
     // 如果成绩少于10个，recent 10的平均值应当按照成绩个数取平均
     const r10Average = (+potential * 40 - b30Sum) / Math.min(playResults.length, 10);
 
@@ -266,7 +271,7 @@ export class ProfileServiceImpl implements ProfileService {
     const songData = await this.chartService.getSongData();
     const stats = await this.musicPlay.getStatistics();
     const profile = this.createEmptyProfile("👽");
-    profile.potential = (Math.floor(stats.maximumPotential * 100) / 100).toFixed(2);
+    profile.potential = this.formatPotential(stats.maximumPotential);
     for (const song of songData) {
       for (const chart of song.charts) {
         profile.best[chart.id] = {
@@ -348,7 +353,7 @@ ON scores.songId = cleartypes.songId AND scores.songDifficulty = cleartypes.song
       }
       const chart = song.charts.find((c) => c.difficulty === difficulties[songDifficulty]);
       if (!chart) {
-        result.skipped.push(`曲目${song.name}的${Object.keys(Difficulty)[songDifficulty]}难度谱面未知`);
+        result.skipped.push(`曲目${song.name}的${difficulties[songDifficulty]}难度谱面未知`);
         continue;
       }
       const noteResult: NoteResult = {
@@ -379,6 +384,7 @@ ON scores.songId = cleartypes.songId AND scores.songDifficulty = cleartypes.song
         fr = 0,
         pm = 0,
         max = 0,
+        rkls = 0,
         totalAccScore = 0,
         totalAccChartCount = 0,
         totalDetailed = 0,
@@ -387,6 +393,7 @@ ON scores.songId = cleartypes.songId AND scores.songDifficulty = cleartypes.song
         totalNotes = 0,
         totalScore = 0,
         totalNoteResultNotes = 0;
+      const arksNotComputedCharts = new Set<string>(Object.keys(filteredCharts));
       for (const record of records) {
         const chart = charts[record.chartId]!;
         const { note } = chart;
@@ -415,6 +422,8 @@ ON scores.songId = cleartypes.songId AND scores.songDifficulty = cleartypes.song
               clear++;
           }
           score = this.musicPlay.computeScore(chart, result);
+          rkls += this.musicPlay.computeRankingLoseScore(record.result, chart);
+          arksNotComputedCharts.delete(record.chartId);
         } else if (record.type === "score") {
           score = record.score;
         }
@@ -425,6 +434,22 @@ ON scores.songId = cleartypes.songId AND scores.songDifficulty = cleartypes.song
           totalAccChartCount++;
         }
       }
+      const frkls =
+        rkls +
+        sum(
+          [...arksNotComputedCharts].map((chartId) => {
+            const chart = charts[chartId]!;
+            return this.musicPlay.computeRankingLoseScore(
+              {
+                far: 0,
+                lost: chart.note,
+                pure: 0,
+                perfect: 0,
+              },
+              chart
+            );
+          })
+        );
       const acc = totalAccScore / totalAccChartCount / this.musicPlay.maxBase;
       const pacc = totalPerfect / totalNoteResultNotes;
       const rest = totalNotes + total * this.musicPlay.maxBase - totalScore;
@@ -440,6 +465,8 @@ ON scores.songId = cleartypes.songId AND scores.songDifficulty = cleartypes.song
         great: totalGreat,
         notes: totalNoteResultNotes,
         pacc,
+        rkls,
+        frkls,
         rest,
       };
     };
@@ -449,11 +476,10 @@ ON scores.songId = cleartypes.songId AND scores.songDifficulty = cleartypes.song
       (chart) => chart.id
     );
     const all = Object.values(profile.best);
-    const filteredResults = all.filter((result) => {
+    const filterChart = (chart: Chart): boolean => {
       if (!query) {
         return true;
       }
-      const chart = charts[result.chartId]!;
       const { rating, difficulty } = query;
       if (difficulty) {
         if (chart.difficulty !== difficulty) {
@@ -466,7 +492,13 @@ ON scores.songId = cleartypes.songId AND scores.songDifficulty = cleartypes.song
         }
       }
       return true;
-    });
+    };
+    const filteredResults = all.filter((result) => filterChart(charts[result.chartId]!));
+    const filteredCharts = Object.fromEntries(
+      Object.entries(charts).filter(([, value]) => {
+        return filterChart(value);
+      })
+    );
     return byRecords(filteredResults);
   }
 

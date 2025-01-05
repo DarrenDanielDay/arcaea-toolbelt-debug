@@ -7,8 +7,23 @@ on:
   push:
     branches: [main]
 
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
 jobs:
   build-and-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
     runs-on: windows-latest
 
     strategy:
@@ -29,20 +44,22 @@ jobs:
         run: npm ci
 
       - name: Setup Environment
-        run: echo "COMMIT_SHA=${{ github.sha }}" > .env
+        run: |
+          echo "COMMIT_SHA=${{ github.sha }}" > .env
+          echo "ASSETS_VENDOR=${{ secrets.ASSETS_VENDOR }}" >> .env
+          echo "ASSETS_VENDOR_PROXY=${{ secrets.ASSETS_VENDOR_PROXY }}" >> .env
 
       - name: Build Project
         run: npm run build
-
       - name: Check TypeScript Types
         run: npx tsc --noEmit
 
-      - name: Deploy Github Pages
-        uses: crazy-max/ghaction-github-pages@v4.0.0
+      - name: Setup Pages
+        uses: actions/configure-pages@v3
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v2
         with:
-          build_dir: arcaea-toolbelt
-          commit_message: "deploy: Deployed by Github Actions"
-          jekyll: false
-          verbose: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          path: "./arcaea-toolbelt"
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v2

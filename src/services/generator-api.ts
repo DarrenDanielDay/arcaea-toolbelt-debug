@@ -3,9 +3,11 @@ import { CharacterData, CharacterImage } from "../models/character";
 import { B30Response } from "../models/profile";
 import { Grade } from "../models/music-play";
 import { ClipConfig, Size } from "../utils/image-clip";
+import { AssetsInfo } from "../models/file";
+import { Banner } from "../models/assets";
 
+export { BannerType } from "../models/assets";
 export { CharacterImageKind, CharacterStatus } from "../models/character";
-
 export { Grade, Side, ClearRank, Difficulty } from "../models/music-play";
 
 export interface ImageFile {
@@ -22,7 +24,7 @@ export interface ImageCandidate {
 
 export interface CandidateResult<T extends ImageCandidate> {
   type: "basic";
-  image: ImageFile;
+  image: ImageFile | null;
   candidate: T;
 }
 
@@ -31,9 +33,7 @@ export interface CustomImageResult {
   image: ImageFile;
 }
 
-export type PickImageResult<T extends ImageCandidate> =
-  | CandidateResult<T>
-  | CustomImageResult;
+export type PickImageResult<T extends ImageCandidate> = CandidateResult<T> | CustomImageResult;
 
 export interface CustomImageOptions {
   single?: string;
@@ -63,6 +63,7 @@ export interface FileExportOptions {
 }
 
 export type HostAPI = {
+  getAssetsInfo(): Promise<AssetsInfo>;
   getSongList(): Promise<any>;
   getPackList(): Promise<any>;
   getAllCharacters(): Promise<CharacterData[]>;
@@ -80,7 +81,8 @@ export type HostAPI = {
   resolvePotentialBadge(rating: number): Promise<URL>;
   resolveGradeImgs(grades: Grade[]): Promise<URL[]>;
   resolveBackgrounds(): Promise<URL[]>;
-  getImages(resources: URL[]): Promise<ImageFile[]>;
+  resolveBanners(banners: Banner[]): Promise<URL[]>
+  getImages(resources: URL[]): Promise<(ImageFile | null)[]>;
   /**
    * 用户选择图片后resolve
    * 用户取消后resolve为null

@@ -1,35 +1,53 @@
 import { Injectable } from "classic-di";
-import { $CoreDataService, $PreferenceService, CoreDataService, Preference, PreferenceService } from "./declarations";
+import {
+  $CoreDataService,
+  $PreferenceService,
+  CoreDataService,
+  Preference,
+  PreferenceKey,
+  PreferenceService,
+} from "./declarations";
 import { Signal } from "hyplate/types";
-import { signal } from "hyplate";
+import { computed, signal } from "hyplate";
 import { AssetsResolverImpl } from "./assets-resolver";
 import { DirectGateway } from "./gateway";
 import { CharacterData } from "../models/character";
 import { SongData } from "../models/music-play";
 import { ChapterData, ItemData, NormalWorldMapData } from "../models/world-mode";
-import { characterData, chartData, itemsData } from "../data/file-list";
-import { ArcaeaToolbeltMeta } from "../models/misc";
+import { assetsInfo, characterData, chartData, itemsData } from "../data/file-list";
+import { ArcaeaToolbeltMeta, ChartExpress } from "../models/misc";
+import { AssetsInfo } from "../models/file";
+import { clone } from "../utils/misc";
 
 const defaultPreference: Preference = {
   ghproxy: false,
   theme: "light",
   showMaxMinus: false,
+  template: {},
+  aolWorldBoost: 1,
 };
 
 @Injectable({
   implements: $PreferenceService,
 })
 export class DefaultPreferenceService implements PreferenceService {
+  #memoryPreference: Preference = clone(defaultPreference);
+  #preference = signal<Preference>(clone(defaultPreference));
+  #computed: { [K in PreferenceKey]?: Signal<Preference[K]> } = {};
   async get(): Promise<Preference> {
-    return defaultPreference;
+    return this.#memoryPreference;
   }
 
-  signal<K extends keyof Preference>(name: K): Signal<Preference[K]> {
-    return signal(defaultPreference[name]);
+  signal<K extends PreferenceKey>(name: K): Signal<Preference[K]> {
+    // @ts-expect-error key access does not match value
+    const signal = (this.#computed[name] ??= computed(() => this.#preference()[name]));
+    return signal;
   }
 
-  update(patch: Partial<Preference>): Promise<void> {
-    throw new Error("Cannot update default preference.");
+  async update(patch: Partial<Preference>): Promise<void> {
+    this.#preference.mutate((old) => {
+      Object.assign(old, patch);
+    });
   }
 }
 
@@ -52,6 +70,9 @@ export class PluginCoreData implements CoreDataService {
     const data = await response.json();
     return data;
   }
+  getAssetsInfo(): Promise<AssetsInfo> {
+    return this.import(assetsInfo);
+  }
   getSongList(): Promise<any> {
     throw new Error("Method not implemented.");
   }
@@ -59,6 +80,9 @@ export class PluginCoreData implements CoreDataService {
     throw new Error("Method not implemented.");
   }
   getMetaData(): Promise<ArcaeaToolbeltMeta> {
+    throw new Error("Method not implemented.");
+  }
+  getChartExpress(): Promise<ChartExpress[]> {
     throw new Error("Method not implemented.");
   }
   getChartData(): Promise<SongData[]> {

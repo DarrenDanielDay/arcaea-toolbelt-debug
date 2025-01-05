@@ -22,13 +22,15 @@ import {
   ItemData,
   NormalWorldMap,
   NormalWorldMapData,
+  RewardSummary,
   RewardType,
 } from "../models/world-mode";
 import type { Signal } from "hyplate/types";
 import { CharacterData, CharacterImage, CharacterIndex } from "../models/character";
 import { PromiseOr } from "../utils/misc";
-import { ArcaeaToolbeltMeta } from "../models/misc";
-import { UploadedFile } from "../models/file";
+import { ArcaeaToolbeltMeta, ChartExpress } from "../models/misc";
+import { AssetsInfo, UploadedFile } from "../models/file";
+import { Banner } from "../models/assets";
 
 export interface DatabaseContext {
   getDB(): Promise<IDBDatabase>;
@@ -56,7 +58,23 @@ export interface Preference {
    * 在成绩结果卡里是否将大P数转换为负小P数
    */
   showMaxMinus: boolean;
+  template: {
+    /**
+     * 最后一次使用的模板地址
+     */
+    url?: string | undefined;
+    /**
+     * 上一次是否使用了自定义模板
+     */
+    custom?: boolean;
+  };
+  /**
+   * 订阅AOL的世界模式倍率
+   */
+  aolWorldBoost: number;
 }
+
+export type PreferenceKey = keyof Preference;
 
 export interface PreferenceService {
   get(): Promise<Preference>;
@@ -90,9 +108,11 @@ export interface Gateway {
 }
 
 export interface CoreDataService {
+  getAssetsInfo(): Promise<AssetsInfo>;
   getSongList(): Promise<any>;
   getPackList(): Promise<any>;
   getMetaData(): Promise<ArcaeaToolbeltMeta>;
+  getChartExpress(): Promise<ChartExpress[]>;
   getChartData(): Promise<SongData[]>;
   getCharacterData(): Promise<CharacterData[]>;
   getItemsData(): Promise<ItemData[]>;
@@ -112,6 +132,7 @@ export interface AssetsResolver {
   resolveUnknownCover(): URL;
   resolveClearImg(clearType: ClearRank): URL;
   resolveGradeImg(scoreRank: Grade): URL;
+  resolveBanner(banner: Banner): URL;
 }
 
 export interface AssetsService {
@@ -148,7 +169,7 @@ export interface SearchResult {
   difficulty: Difficulty;
 }
 
-export interface DifficultyStatistics {
+export interface ChecksumStatistics {
   /**
    * 谱面个数
    */
@@ -157,6 +178,16 @@ export interface DifficultyStatistics {
    * 物量总和
    */
   notes: number;
+}
+
+/**
+ * 数据不包含被删除的
+ */
+export interface DifficultyStatistics extends ChecksumStatistics {
+  /**
+   * 被删除的谱面相应信息
+   */
+  deleted: ChecksumStatistics;
 }
 
 export type ChartDifficultyStatistics = Record<Difficulty, DifficultyStatistics>;
@@ -181,9 +212,17 @@ export interface ChartService {
   getCover(chart: Chart, song: Song): string;
 }
 
+export interface LevelData {
+  level: number;
+  value: number;
+}
+
 export interface CharacterService {
   getCharacterIndex(): Promise<CharacterIndex>;
   getAllCharacters(): Promise<CharacterData[]>;
+  computeL1L20Factor(levelA: LevelData, levelB: LevelData): [number, number];
+  interpolateL1L20Factor(level: number, f1: number, f20: number): number;
+  interpolateL1L20Factors(f1: number, f20: number): number[];
 }
 
 export interface MusicPlayStatistics {
@@ -208,6 +247,7 @@ export interface MusicPlayService {
   computeGrade(score: number): Grade;
   computeClearRank(play: NoteResult, chart: Chart, clear: PartnerClearRank | null): ClearRank | null;
   computeScoreResult(score: number, chart: Chart): ScoreResult;
+  computeRankingLoseScore(play: NoteResult, chart: Chart): number;
   computePMConstant(potential: number, overflow: boolean): number;
   inverseScore(potential: number, constant: number): number;
   inverseConstant(potential: number, score: number, raw?: boolean): number;
@@ -281,6 +321,14 @@ export interface BestStatistics {
    */
   pacc: number;
   /**
+   * 排名失分
+   */
+  rkls: number;
+  /**
+   * 总排名失分
+   */
+  frkls: number;
+  /**
    * 有成绩的谱面距离全部理论相差的分数
    */
   rest: number;
@@ -332,10 +380,12 @@ export type WorldMapBonus =
       type: "legacy";
       fragment: number;
       stamina: number;
+      aol: number;
     }
   | {
       type: "new";
       x4: boolean;
+      aol: number;
     };
 
 export interface InverseProgressSolution {
@@ -349,7 +399,7 @@ export interface InverseProgressSolution {
 export interface WorldModeService {
   getLongtermMaps(): Promise<Chapter[]>;
   getEventMaps(): Promise<NormalWorldMap[]>;
-  getMapRewards(map: NormalWorldMap): Partial<Record<RewardType, string[]>>;
+  getMapRewards(map: NormalWorldMap): Partial<Record<RewardType, RewardSummary>>;
   computePlayResult(potential: number): number;
   computeBasicProgress(step: number, potential: number): number;
   computeProgress(step: number, potential: number, bonus: WorldMapBonus | null): number;
